@@ -1,0 +1,8 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Server
+Bundle-SymbolicName: es.alba.sweet.server
+Bundle-Version: 1.0.0.qualifier
+Require-Bundle: es.alba.sweet.base;bundle-version="1.0.0"
+Automatic-Module-Name: es.alba.sweet.server
+Bundle-RequiredExecutionEnvironment: JavaSE-11
