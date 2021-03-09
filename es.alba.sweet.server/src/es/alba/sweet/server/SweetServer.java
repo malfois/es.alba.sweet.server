@@ -156,6 +156,7 @@ public class SweetServer {
 				} catch (JsonException e) {
 					e.printStackTrace();
 				}
+				break;
 			case EXIT_SERVER:
 				broadcast(commandStream);
 				break;

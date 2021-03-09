@@ -6,25 +6,38 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import es.alba.sweet.base.ObservableProperty;
 import es.alba.sweet.base.communication.command.CommandName;
 import es.alba.sweet.base.communication.command.CommandStream;
+import es.alba.sweet.base.communication.command.Name;
+import es.alba.sweet.base.maths.Format;
+import es.alba.sweet.base.output.Output;
+import es.alba.sweet.base.scan.DataPoint;
 import es.alba.sweet.base.scan.Header;
+import es.alba.sweet.base.scan.ScanDataSet;
 import es.alba.sweet.base.scan.ScanFileException;
 
 public class ScanSimulation extends ObservableProperty implements Runnable {
 
 	private String			filename;
-	private String			diagnostic;
+
+	private Header			scanHeader;
+	private String			xAxis;
+	private List<String>	yAxis		= new ArrayList<>();
+	private ScanDataSet		scanDataset;
+
+	private List<String>	dataLines	= new ArrayList<>();
 
 	private CommandStream	command;
 
 	public ScanSimulation(String filename, String diagnostic) {
 		this.filename = filename;
-		this.diagnostic = diagnostic;
+		this.yAxis.add(diagnostic);
 	}
 
 	private void setCommand(CommandStream command) {
@@ -34,14 +47,21 @@ public class ScanSimulation extends ObservableProperty implements Runnable {
 	@Override
 	public void run() {
 		try {
-			readFile();
-		} catch (IOException | ScanFileException e) {
+			List<String> diagnostics = readFile();
+			readData(diagnostics);
+			scanDataPoint();
+			stopScan();
+		} catch (IOException e) {
+			Output.MESSAGE.error("es.alba.sweet.server.ScanSimulation.run", e.getMessage());
+		} catch (ScanFileException e) {
+			Output.MESSAGE.error("es.alba.sweet.server.ScanSimulation.run", e.getMessage());
 			e.printStackTrace();
-			return;
+		} catch (InterruptedException e) {
+			Output.MESSAGE.error("es.alba.sweet.server.ScanSimulation.run", e.getMessage());
 		}
 	}
 
-	private void readFile() throws IOException, ScanFileException {
+	private List<String> readFile() throws IOException, ScanFileException {
 		Path path = Paths.get(this.filename);
 		List<String> lines = Files.lines(path).collect(Collectors.toList());
 
@@ -54,7 +74,7 @@ public class ScanSimulation extends ObservableProperty implements Runnable {
 		String[] words = commandLine.split(" ");
 
 		int scanID = Integer.parseInt(words[1]);
-		String motor = words[3];
+		this.xAxis = words[3];
 		int numberOfPoints = Integer.parseInt(words[6]) + 1;
 
 		String diagnosticLine = lines.stream().filter(p -> p.startsWith("#L")).findFirst().orElse("");
@@ -64,34 +84,77 @@ public class ScanSimulation extends ObservableProperty implements Runnable {
 		String[] commands = Arrays.copyOfRange(words, 2, words.length);
 		String command = String.join(" ", commands);
 
-		Header scanHeader = new Header();
+		scanHeader = new Header();
 		scanHeader.setCommand(command);
 		scanHeader.setDiagnostics(diagnostics);
 		scanHeader.setHeaderFile(headerFile);
-		scanHeader.setMotor(motor);
+		scanHeader.setMotor(this.xAxis);
 		scanHeader.setNumberOfPoints(numberOfPoints);
 		scanHeader.setScanID(scanID);
-		scanHeader.setSelectedDiagnostic(diagnostic);
+		scanHeader.setSelectedDiagnostic(yAxis.get(0));
 		scanHeader.setFilename(this.filename);
+		scanHeader.getPlotDiagnostics().add(yAxis.get(0));
 
 		CommandStream commandStream = new CommandStream(CommandName.SCAN_HEADER, scanHeader.toJson());
 		setCommand(commandStream);
 
-		List<String> dataLines = new ArrayList<>();
+		return diagnostics;
+
+	}
+
+	public void readData(List<String> diagnostics) throws IOException {
+		Path path = Paths.get(this.filename);
+		List<String> lines = Files.lines(path).collect(Collectors.toList());
+		dataLines = new ArrayList<>();
 		lines.stream().filter(line -> !line.startsWith("#")).forEach(a -> dataLines.add(a));
-		double[][] data = new double[diagnostics.size()][numberOfPoints];
-		for (int i = 0; i < numberOfPoints; i++) {
-			String[] dataLine = dataLines.get(i).split(" ");
-			for (int j = 0; j < data.length; j++) {
-				data[j][i] = Double.parseDouble(dataLine[j].trim());
+
+		int motorIndex = diagnostics.indexOf(this.xAxis);
+
+		this.scanDataset = new ScanDataSet(diagnostics);
+
+		for (String dataLine : dataLines) {
+			String[] values = dataLine.split(" ");
+			double x = Double.parseDouble(values[motorIndex]);
+
+			Map<String, DataPoint> points = new HashMap<>();
+			List<Double> data = new ArrayList<>();
+
+			int nValues = values.length;
+			for (int i = 0; i < nValues; i++) {
+				double y = Double.parseDouble(values[i]);
+				points.put(diagnostics.get(i), new DataPoint(x, y));
+				data.add(y);
 			}
+			scanDataset.addPoint(points);
 		}
 
-		for (int i = 0; i < diagnostics.size(); i++) {
-			for (int j = 0; j < numberOfPoints; j++) {
-				System.out.print(data[i][j] + " ");
-			}
-			System.out.println();
+	}
+
+	public void scanDataPoint() throws InterruptedException {
+		Format format = new Format();
+
+		int numberOfPoints = scanHeader.getNumberOfPoints();
+		for (int i = 0; i < numberOfPoints; i++) {
+			ScanDataSet dataSet = this.scanDataset.sublist(yAxis, 0, i + 1);
+			dataSet.derivate();
+			dataSet.fit();
+
+			List<String> stringValues = List.of(dataLines.get(i).split(" "));
+			List<Double> values = stringValues.stream().map(m -> Double.parseDouble(m)).collect(Collectors.toList());
+			String text = values.stream().map(m -> format.toText(m)).collect(Collectors.joining(",\t"));
+			dataSet.setText(text);
+
+			CommandStream commandStream = new CommandStream(CommandName.SCAN_DATA_POINT, dataSet.toJson());
+			setCommand(commandStream);
+
+			Thread.sleep(500);
 		}
+	}
+
+	public void stopScan() {
+		Name name = new Name();
+		name.setName(this.getClass().toString());
+		CommandStream commandStream = new CommandStream(CommandName.SCAN_STOPPED, name.toJson());
+		setCommand(commandStream);
 	}
 }

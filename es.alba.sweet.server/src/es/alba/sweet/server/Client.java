@@ -1,6 +1,8 @@
 package es.alba.sweet.server;
 
 import java.awt.TrayIcon.MessageType;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -81,9 +83,10 @@ public class Client extends ObservableProperty implements Runnable {
 				case SCAN_SIMULATION:
 					ScanSimulationParameter parameter = new ScanSimulationParameter(command.getCommandArgument());
 					ScanSimulation scanSimulation = new ScanSimulation(parameter.getFilename(), parameter.getDiagnostics());
-					scanSimulation.addPropertyChangeListener(e -> sendMessage((CommandStream) e.getNewValue()));
-					Thread thread = new Thread(scanSimulation);
-					thread.start();
+					scanSimulation.addPropertyChangeListener(new ScanSimulationPropertyListener());
+					Thread threadSim = new Thread(scanSimulation);
+					threadSim.setName(ScanSimulation.class.toString());
+					threadSim.start();
 					break;
 				default:
 					break;
@@ -98,7 +101,12 @@ public class Client extends ObservableProperty implements Runnable {
 				e1.printStackTrace();
 			}
 		} catch (ReadingLineException e) {
-			e.printStackTrace();
+			this.close();
+			Name name = new Name();
+			name.setName(this.name);
+			CommandStream commandStop = new CommandStream(CommandName.STOP_CLIENT, name.toJson());
+			setCommand(commandStop);
+			// e.printStackTrace();
 		} catch (JsonException e) {
 			e.printStackTrace();
 		}
@@ -127,6 +135,10 @@ public class Client extends ObservableProperty implements Runnable {
 	public void close() {
 		// try to close the connection
 		try {
+			Thread thread = Thread.getAllStackTraces().keySet().stream().filter(p -> p.getName().equals(ScanSimulation.class.toString())).findFirst().orElse(null);
+			System.out.println(thread);
+			if (thread != null) thread.interrupt();
+
 			if (this.clientSocket != null) {
 				this.clientSocket.close();
 			}
@@ -147,4 +159,29 @@ public class Client extends ObservableProperty implements Runnable {
 			throw new ReadingLineException("Error reading data from " + this.name);
 		}
 	}
+
+	private class ScanSimulationPropertyListener implements PropertyChangeListener {
+
+		@Override
+		public void propertyChange(PropertyChangeEvent evt) {
+			CommandStream commandStream = (CommandStream) evt.getNewValue();
+			CommandName command = commandStream.getCommandName();
+			switch (command) {
+			case SCAN_STOPPED:
+				Name name;
+				try {
+					name = new Name(commandStream.getCommandArgument());
+					String threadName = name.get();
+					Thread thread = Thread.getAllStackTraces().keySet().stream().filter(p -> p.getName().equals(threadName)).findFirst().orElse(null);
+					if (thread != null) thread.interrupt();
+				} catch (JsonException e) {
+					e.printStackTrace();
+				}
+			default:
+				sendMessage(commandStream);
+				break;
+			}
+		}
+	}
+
 }
