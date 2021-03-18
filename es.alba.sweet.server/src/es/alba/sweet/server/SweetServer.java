@@ -183,6 +183,8 @@ public class SweetServer {
 				Output.MESSAGE.info("es.alba.sweet.server.SweetServer.ExitServer.run", "Error deleting file " + configuration.getFile().toPath() + " " + e.getMessage());
 				e.printStackTrace();
 			}
+
+			LogFile.close();
 		}
 	}
 }

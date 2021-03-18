@@ -8,12 +8,14 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.util.List;
 
 import es.alba.sweet.base.ObservableProperty;
 import es.alba.sweet.base.communication.ReadingLineException;
 import es.alba.sweet.base.communication.command.CommandName;
 import es.alba.sweet.base.communication.command.CommandStream;
 import es.alba.sweet.base.communication.command.CommandStreamNullException;
+import es.alba.sweet.base.communication.command.FunctionSimulationArgument;
 import es.alba.sweet.base.communication.command.JsonException;
 import es.alba.sweet.base.communication.command.Name;
 import es.alba.sweet.base.communication.command.ScanSimulationParameter;
@@ -88,6 +90,17 @@ public class Client extends ObservableProperty implements Runnable {
 					threadSim.setName(ScanSimulation.class.toString());
 					threadSim.start();
 					break;
+				case SCAN_FUNCTION_SIMULATION:
+					FunctionSimulationArgument argument = new FunctionSimulationArgument(command.getCommandArgument());
+					FunctionSimulation functionSimulation = new FunctionSimulation(argument);
+					functionSimulation.addPropertyChangeListener(new FunctionSimulationPropertyListener());
+					Thread threadFunc = new Thread(functionSimulation);
+					threadFunc.setName(FunctionSimulation.class.toString());
+					threadFunc.start();
+					break;
+				case SCAN_STOPPED:
+					closeSimulationThread();
+					break;
 				default:
 					break;
 				}
@@ -132,13 +145,15 @@ public class Client extends ObservableProperty implements Runnable {
 		return true;
 	}
 
+	private void closeSimulationThread() {
+		List<String> simulationNames = SimulationName.get();
+		Thread.getAllStackTraces().keySet().stream().filter(p -> simulationNames.contains(p.getName())).forEach(a -> a.interrupt());
+	}
+
 	public void close() {
 		// try to close the connection
 		try {
-			Thread thread = Thread.getAllStackTraces().keySet().stream().filter(p -> p.getName().equals(ScanSimulation.class.toString())).findFirst().orElse(null);
-			System.out.println(thread);
-			if (thread != null) thread.interrupt();
-
+			closeSimulationThread();
 			if (this.clientSocket != null) {
 				this.clientSocket.close();
 			}
@@ -161,6 +176,30 @@ public class Client extends ObservableProperty implements Runnable {
 	}
 
 	private class ScanSimulationPropertyListener implements PropertyChangeListener {
+
+		@Override
+		public void propertyChange(PropertyChangeEvent evt) {
+			CommandStream commandStream = (CommandStream) evt.getNewValue();
+			CommandName command = commandStream.getCommandName();
+			switch (command) {
+			case SCAN_STOPPED:
+				Name name;
+				try {
+					name = new Name(commandStream.getCommandArgument());
+					String threadName = name.get();
+					Thread thread = Thread.getAllStackTraces().keySet().stream().filter(p -> p.getName().equals(threadName)).findFirst().orElse(null);
+					if (thread != null) thread.interrupt();
+				} catch (JsonException e) {
+					e.printStackTrace();
+				}
+			default:
+				sendMessage(commandStream);
+				break;
+			}
+		}
+	}
+
+	private class FunctionSimulationPropertyListener implements PropertyChangeListener {
 
 		@Override
 		public void propertyChange(PropertyChangeEvent evt) {

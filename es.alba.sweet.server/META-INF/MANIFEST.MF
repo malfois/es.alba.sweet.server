@@ -7,3 +7,4 @@ Require-Bundle: es.alba.sweet.base;bundle-version="1.0.0",
  org.slf4j.log4j;bundle-version="1.7.2"
 Automatic-Module-Name: es.alba.sweet.server
 Bundle-RequiredExecutionEnvironment: JavaSE-11
+Export-Package: es.alba.sweet.server

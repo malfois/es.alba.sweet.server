@@ -121,6 +121,7 @@ public class ScanSimulation extends ObservableProperty implements Runnable {
 
 			int nValues = values.length;
 			for (int i = 0; i < nValues; i++) {
+				if (values[i].equals("nan")) continue;
 				double y = Double.parseDouble(values[i]);
 				points.put(diagnostics.get(i), new DataPoint(x, y));
 				data.add(y);
